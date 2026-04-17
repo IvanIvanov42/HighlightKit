@@ -2,85 +2,72 @@ let watchedStrings = [];
 let observer = null;
 let isHighlighting = false;
 
-// Load watched strings from storage
+// ── Load from storage ────────────────────────────────────────────────────────
 function loadWatchedStrings() {
   chrome.storage.local.get(["watchedStrings"], function (result) {
     watchedStrings = result.watchedStrings || [];
-    console.log("Loaded watched strings:", watchedStrings);
     highlightMatches();
   });
 }
 
-// Highlight all matching text on the page
+// ── Full re-highlight ────────────────────────────────────────────────────────
 function highlightMatches() {
   if (isHighlighting) return;
-
   isHighlighting = true;
 
-  if (observer) {
-    observer.disconnect();
+  if (observer) observer.disconnect();
+
+  // Always start fresh so removed/disabled items are cleared
+  removeAllHighlights();
+
+  const active = watchedStrings.filter((item) => item.enabled !== false);
+
+  if (active.length > 0) {
+    processTextNodes(document.body, active);
   }
-
-  if (watchedStrings.length === 0) {
-    removeAllHighlights();
-    reconnectObserver();
-    isHighlighting = false;
-    return;
-  }
-
-  // Process all text nodes
-  processTextNodes(document.body);
-
-  console.log("Highlighting complete");
 
   reconnectObserver();
   isHighlighting = false;
 }
 
-// Process text nodes in a given element
-function processTextNodes(element) {
-  const walker = document.createTreeWalker(
-    element,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode: function (node) {
-        const parent = node.parentElement;
-        if (
-          !parent ||
-          parent.tagName === "SCRIPT" ||
-          parent.tagName === "STYLE" ||
-          parent.classList.contains("string-highlight")
-        ) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
+// ── Walk text nodes and collect matches ──────────────────────────────────────
+function processTextNodes(element, active) {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode: function (node) {
+      const parent = node.parentElement;
+      if (
+        !parent ||
+        parent.tagName === "SCRIPT" ||
+        parent.tagName === "STYLE" ||
+        parent.tagName === "TEXTAREA" ||
+        parent.tagName === "INPUT" ||
+        parent.classList.contains("string-highlight")
+      ) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
     },
-    false,
-  );
+  });
 
-  let node;
   const nodesToProcess = [];
+  let node;
 
   while ((node = walker.nextNode())) {
-    const text = node.textContent;
-    const textLower = text.toLowerCase();
-
-    // Check if any watched string is in this text
-    for (let item of watchedStrings) {
+    const textLower = node.textContent.toLowerCase();
+    for (const item of active) {
       if (textLower.includes(item.text.toLowerCase())) {
         nodesToProcess.push({ node, item });
-        break;
+        break; // one style per text node
       }
     }
   }
 
-  // Process nodes
   nodesToProcess.forEach(({ node, item }) => {
     highlightTextInNode(node, item.text, item.style);
   });
 }
 
+// ── Wrap matched substrings in a <span> ──────────────────────────────────────
 function highlightTextInNode(textNode, searchString, style) {
   if (!textNode.parentNode) return;
 
@@ -91,7 +78,6 @@ function highlightTextInNode(textNode, searchString, style) {
   let startIndex = 0;
   const fragments = [];
 
-  // Find all occurrences
   while (true) {
     const index = textLower.indexOf(searchLower, startIndex);
     if (index === -1) {
@@ -101,33 +87,28 @@ function highlightTextInNode(textNode, searchString, style) {
       break;
     }
 
-    // Text before match
     if (index > startIndex) {
       fragments.push(
         document.createTextNode(text.substring(startIndex, index)),
       );
     }
 
-    // Highlighted match
-    const matchedText = text.substring(index, index + searchString.length);
     const span = document.createElement("span");
-    span.className = `string-highlight string-highlight-${style}`;
-    span.textContent = matchedText;
+    span.className = "string-highlight string-highlight-" + style;
+    span.textContent = text.substring(index, index + searchString.length);
     fragments.push(span);
 
     startIndex = index + searchString.length;
   }
 
-  // Replace if we found matches
   if (fragments.length > 1) {
     const parent = textNode.parentNode;
-    fragments.forEach((fragment) => {
-      parent.insertBefore(fragment, textNode);
-    });
+    fragments.forEach((f) => parent.insertBefore(f, textNode));
     parent.removeChild(textNode);
   }
 }
 
+// ── Remove all highlights (unwrap spans) ─────────────────────────────────────
 function removeAllHighlights() {
   document.querySelectorAll(".string-highlight").forEach((span) => {
     const parent = span.parentNode;
@@ -138,32 +119,29 @@ function removeAllHighlights() {
   });
 }
 
+// ── Mutation observer for dynamic content ────────────────────────────────────
 function reconnectObserver() {
   if (observer) {
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 }
 
-// Create observer that only processes new nodes
 observer = new MutationObserver(function (mutations) {
-  if (isHighlighting || watchedStrings.length === 0) return;
+  if (isHighlighting) return;
+
+  const active = watchedStrings.filter((item) => item.enabled !== false);
+  if (active.length === 0) return;
 
   isHighlighting = true;
   observer.disconnect();
 
-  // Only process added nodes
   mutations.forEach((mutation) => {
     mutation.addedNodes.forEach((node) => {
       if (node.nodeType === Node.ELEMENT_NODE) {
-        processTextNodes(node);
+        processTextNodes(node, active);
       } else if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent;
-        const textLower = text.toLowerCase();
-
-        for (let item of watchedStrings) {
+        const textLower = node.textContent.toLowerCase();
+        for (const item of active) {
           if (textLower.includes(item.text.toLowerCase())) {
             highlightTextInNode(node, item.text, item.style);
             break;
@@ -177,16 +155,15 @@ observer = new MutationObserver(function (mutations) {
   isHighlighting = false;
 });
 
-// Start observing
 reconnectObserver();
 
-// Listen for storage changes
-chrome.storage.onChanged.addListener(function (changes, namespace) {
+// ── React to storage changes ─────────────────────────────────────────────────
+chrome.storage.onChanged.addListener(function (changes) {
   if (changes.watchedStrings) {
-    loadWatchedStrings();
+    watchedStrings = changes.watchedStrings.newValue || [];
+    highlightMatches();
   }
 });
 
-// Initial load
+// ── Boot ─────────────────────────────────────────────────────────────────────
 loadWatchedStrings();
-console.log("HighlightKit in action!");

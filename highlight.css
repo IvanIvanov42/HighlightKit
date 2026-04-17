@@ -7,6 +7,11 @@
   color: #000 !important;
 }
 
+.string-highlight-green {
+  background-color: #32cd32 !important;
+  color: #000 !important;
+}
+
 .string-highlight-red {
   background-color: #ff0000 !important;
   color: #fff !important;

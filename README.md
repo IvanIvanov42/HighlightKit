@@ -5,17 +5,18 @@ Highlight specific text on any webpage. Useful for monitoring live feeds, tracki
 ## Features
 
 - Highlights text in real-time as it appears on the page
-- Three highlight colors: Yellow, Red, Black
+- Four highlight colors: Yellow, Red, Black, Green
 - Case-insensitive search
 - Works on any website
 - Remembers your settings
+- Import/Export feature
 
 ## Installation
 
 ### Manual Installation
 
 1. Download this repository
-2. Open Edge and go to `edge://extensions/`
+2. Open your browser and go to `browser://extensions/`
 3. Turn on "Developer mode"
 4. Click "Load unpacked" and select the folder
 
